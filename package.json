@@ -1,6 +1,6 @@
 {
   "name": "omp-hotkeys",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Claude-style hotkeys for Oh My Pi (omp) and pi: backslash-Enter inserts a newline instead of submitting, double-Escape clears the draft — no terminal CSI gymnastics, works everywhere including Windows Terminal.",
   "type": "module",
   "main": "./dist/index.js",

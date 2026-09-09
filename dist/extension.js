@@ -39,6 +39,8 @@ export function shouldContinue(event) {
     return `${stripContinuation(text)}\n`;
 }
 let stopHotkeys;
+/** True between `agent_start` and `agent_end`/`agent_settled`. */
+let agentBusy = false;
 function disarmHotkeys() {
     try {
         stopHotkeys?.();
@@ -69,7 +71,7 @@ function armHotkeys(ctx) {
     const setText = ui.setEditorText.bind(ui);
     const subscribe = ui.onTerminalInput.bind(ui);
     try {
-        stopHotkeys = subscribe(createDoubleEscapeHandler({ getText, setText })) ?? undefined;
+        stopHotkeys = subscribe(createDoubleEscapeHandler({ getText, setText, isBusy: () => agentBusy })) ?? undefined;
     }
     catch {
         stopHotkeys = undefined;
@@ -110,12 +112,44 @@ export default function hotkeysExtension(pi) {
         return { handled: true };
     });
     pi.on('session_start', (_event, ctx) => {
+        agentBusy = false;
         armHotkeys(ctx);
     });
     pi.on('session_switch', (_event, ctx) => {
+        agentBusy = false;
         armHotkeys(ctx);
     });
     pi.on('session_shutdown', () => {
+        agentBusy = false;
         disarmHotkeys();
     });
+    // Busy gate for the interrupt guard: swallow lone-Escape-with-draft only
+    // while a run is live. Each in its own try/catch — an older host that
+    // rejects unknown events must not break the registrations above. If the
+    // events never fire, the handler's omitted-probe default (assume busy)
+    // keeps the guard fail-safe toward never interrupting on double-Escape.
+    try {
+        pi.on('agent_start', () => {
+            agentBusy = true;
+        });
+    }
+    catch {
+        // Host without agent events: guard stays on its fail-safe default.
+    }
+    try {
+        pi.on('agent_end', () => {
+            agentBusy = false;
+        });
+    }
+    catch {
+        // Host without agent events: guard stays on its fail-safe default.
+    }
+    try {
+        pi.on('agent_settled', () => {
+            agentBusy = false;
+        });
+    }
+    catch {
+        // Host without agent events: guard stays on its fail-safe default.
+    }
 }
