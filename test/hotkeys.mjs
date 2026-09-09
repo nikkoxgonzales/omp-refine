@@ -32,9 +32,14 @@ function install(ctx) {
 
 function ctxWithEditor() {
   const ctx = { editorText: '', ui: null };
-  ctx.ui = { setEditorText(text) { ctx.editorText = text; } };
+  ctx.ui = {
+    getEditorText() { return ctx.editorText; },
+    setEditorText(text) { ctx.editorText = text; },
+  };
   return ctx;
 }
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('trailing-backslash counting', () => {
   it('counts zero/one/two/three', () => {
@@ -94,31 +99,43 @@ describe('shouldContinue gate', () => {
 });
 
 describe('wired input handler', () => {
-  it('continuation swallows submit and restores editor text', () => {
+  it('continuation swallows submit, restores editor text on next tick (past host clearDraft)', async () => {
     const ctx = ctxWithEditor();
     const onInput = install(ctx);
     const result = onInput({ source: 'interactive', text: 'hello\\' });
     assert.deepEqual(result, { handled: true });
+    assert.equal(ctx.editorText, ''); // restore is deferred: host clears first, we land after
+    await tick();
     assert.equal(ctx.editorText, 'hello\n');
   });
-  it('normal submit passes through, editor untouched', () => {
+  it('normal submit passes through, editor untouched', async () => {
     const ctx = ctxWithEditor();
     const onInput = install(ctx);
     assert.equal(onInput({ source: 'interactive', text: 'hello' }), undefined);
     assert.equal(onInput({ source: 'interactive', text: 'trailing\\\\' }), undefined);
+    await tick();
     assert.equal(ctx.editorText, '');
   });
-  it('non-interactive and image submits pass through', () => {
+  it('non-interactive and image submits pass through', async () => {
     const ctx = ctxWithEditor();
     const onInput = install(ctx);
     assert.equal(onInput({ source: 'rpc', text: 'x\\' }), undefined);
     assert.equal(onInput({ source: 'interactive', text: 'x\\', images: [{}] }), undefined);
+    await tick();
     assert.equal(ctx.editorText, '');
   });
-  it('fails OPEN without a live editor: submits literally', () => {
+  it('fails OPEN without a live editor: submits literally', async () => {
     const headless = install({});
     assert.equal(headless({ source: 'interactive', text: 'x\\' }), undefined);
-    const throwing = install({ ui: { setEditorText() { throw new Error('nope'); } } });
-    assert.equal(throwing({ source: 'interactive', text: 'x\\' }), undefined);
+    const noGet = install({ ui: { setEditorText() {} } });
+    assert.equal(noGet({ source: 'interactive', text: 'x\\' }), undefined);
+    const throwingGet = install({ ui: { getEditorText() { throw new Error('nope'); }, setEditorText() {} } });
+    assert.equal(throwingGet({ source: 'interactive', text: 'x\\' }), undefined);
+    await tick();
+  });
+  it('dead editor mid-tick swallows silently (host setEditorText never throws live)', async () => {
+    const throwingSet = install({ ui: { getEditorText() { return ''; }, setEditorText() { throw new Error('gone'); } } });
+    assert.deepEqual(throwingSet({ source: 'interactive', text: 'x\\' }), { handled: true });
+    await tick(); // deferred throw is caught: must not reject
   });
 });

@@ -18,6 +18,7 @@
  */
 interface UiLike {
     setEditorText?: (text: string) => void;
+    getEditorText?: () => string;
     [key: string]: unknown;
 }
 interface ContextLike {

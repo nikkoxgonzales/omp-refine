@@ -43,17 +43,32 @@ export default function hotkeysExtension(pi) {
         if (continued === undefined)
             return undefined;
         // Fail OPEN: without a live editor (headless/RPC, or a host that does
-        // not expose setEditorText) a swallowed submit would eat the user's
-        // message — so submit literally instead.
+        // not expose the editor surface) a swallowed submit would eat the
+        // user's message — so submit literally instead. The read below probes
+        // liveness while the submit can still proceed.
         const ui = ctx?.ui;
-        if (ui === undefined || typeof ui.setEditorText !== 'function')
+        if (ui === undefined)
+            return undefined;
+        if (typeof ui.setEditorText !== 'function' || typeof ui.getEditorText !== 'function')
             return undefined;
         try {
-            ui.setEditorText(continued);
+            ui.getEditorText();
         }
         catch {
             return undefined;
         }
+        // ORDERING: the host runs `editor.clearDraft()` synchronously after
+        // `emitInput` resolves handled, so a synchronous restore is wiped —
+        // the submit vanishes AND the draft is lost (the reported "clears the
+        // text"). A macrotask always lands after that microtask continuation.
+        setTimeout(() => {
+            try {
+                ui?.setEditorText?.(continued);
+            }
+            catch {
+                // Session died mid-tick: nothing left to restore into.
+            }
+        }, 0);
         return { handled: true };
     });
 }
