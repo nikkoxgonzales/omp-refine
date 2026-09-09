@@ -1,7 +1,7 @@
 {
   "name": "omp-hotkeys",
-  "version": "0.1.0",
-  "description": "Claude-style hotkeys for Oh My Pi (omp) and pi: backslash-Enter inserts a newline instead of submitting — no terminal CSI gymnastics, works everywhere including Windows Terminal.",
+  "version": "0.2.0",
+  "description": "Claude-style hotkeys for Oh My Pi (omp) and pi: backslash-Enter inserts a newline instead of submitting, double-Escape clears the draft — no terminal CSI gymnastics, works everywhere including Windows Terminal.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/hotkeys.mjs"
+    "test": "npm run build && node --test test/hotkeys.mjs test/double-escape.mjs"
   },
   "omp": {
     "extensions": [

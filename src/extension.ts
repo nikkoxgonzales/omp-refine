@@ -18,10 +18,14 @@
  */
 
 import { hasContinuation, stripContinuation } from './continuation.js';
+import { createDoubleEscapeHandler } from './double-escape.js';
 
 interface UiLike {
   setEditorText?: (text: string) => void;
   getEditorText?: () => string;
+  onTerminalInput?: (
+    handler: (data: string) => { consume?: boolean; data?: string } | undefined,
+  ) => () => void;
   [key: string]: unknown;
 }
 
@@ -54,6 +58,45 @@ export function shouldContinue(event: unknown): string | undefined {
   return `${stripContinuation(text)}\n`;
 }
 
+let stopHotkeys: (() => void) | undefined;
+
+function disarmHotkeys(): void {
+  try {
+    stopHotkeys?.();
+  } catch {
+    // A stale unsubscribe must never block re-arming or shutdown.
+  }
+  stopHotkeys = undefined;
+}
+
+/**
+ * (Re)subscribe the double-Escape raw-input listener for this session's
+ * editor. Headless/RPC contexts expose no terminal input — the capability
+ * checks skip them silently.
+ */
+function armHotkeys(ctx: ContextLike): void {
+  disarmHotkeys();
+  const ui = ctx?.ui;
+  if (ui === undefined) return;
+  if (
+    typeof ui.getEditorText !== 'function' ||
+    typeof ui.setEditorText !== 'function' ||
+    typeof ui.onTerminalInput !== 'function'
+  ) {
+    return;
+  }
+  // Bind now: these narrowed method types are consumed in direct flow, and
+  // the bound closures keep the host receiver for later raw-input ticks.
+  const getText = ui.getEditorText.bind(ui);
+  const setText = ui.setEditorText.bind(ui);
+  const subscribe = ui.onTerminalInput.bind(ui);
+  try {
+    stopHotkeys = subscribe(createDoubleEscapeHandler({ getText, setText })) ?? undefined;
+  } catch {
+    stopHotkeys = undefined;
+  }
+}
+
 export default function hotkeysExtension(pi: ExtensionHostLike): void {
   pi.on('input', (event, ctx) => {
     const continued = shouldContinue(event);
@@ -82,5 +125,15 @@ export default function hotkeysExtension(pi: ExtensionHostLike): void {
       }
     }, 0);
     return { handled: true };
+  });
+
+  pi.on('session_start', (_event, ctx) => {
+    armHotkeys(ctx);
+  });
+  pi.on('session_switch', (_event, ctx) => {
+    armHotkeys(ctx);
+  });
+  pi.on('session_shutdown', () => {
+    disarmHotkeys();
   });
 }

@@ -1,11 +1,12 @@
 # omp-hotkeys
 
-**Claude-style hotkeys for [Oh My Pi](https://github.com/can1357/oh-my-pi) and pi** — v1 does one thing: `\` + `Enter` inserts a newline instead of submitting.
+**Claude-style hotkeys for [Oh My Pi](https://github.com/can1357/oh-my-pi) and pi** — `\` + `Enter` for newline, double-`Escape` to clear the draft.
 
 ```text
 hello \<Enter>   keeps editing:  "hello⏎|"   (backslash consumed, no submit)
 hello <Enter>    submits "hello"
 hello \\<Enter>  submits "hello\\"            (escape hatch: double it)
+double-<Esc>     clears the draft             (only while typing; empty box keeps host rewind)
 ```
 
 **Why an extension, not a keybinding:** `\` is an ordinary character and `Enter` is plain `Enter`, so this works on *every* terminal. Modified-Enter chords (`Shift+Enter`, `Ctrl+Enter`) need terminal CSI support that Windows Terminal and multiplexers routinely swallow — the exact failure mode this replaces. Complements the built-in `tui.input.newLine` (`Shift+Enter` / `Ctrl+J`); those never reach submit, so nothing conflicts.
@@ -44,10 +45,10 @@ Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT s
 3. Add the plugin to `%USERPROFILE%\.omp\plugins\omp-plugins.lock.json`:
 
    ```json
-   { "plugins": { "omp-hotkeys": { "version": "0.1.0", "enabledFeatures": null, "enabled": true } }, "settings": {} }
+   { "plugins": { "omp-hotkeys": { "version": "0.2.0", "enabledFeatures": null, "enabled": true } }, "settings": {} }
    ```
 
-4. `omp plugin list` should show `omp-hotkeys@0.1.0`. Restart omp.
+4. `omp plugin list` should show `omp-hotkeys@0.2.0`. Restart omp.
 
 </details>
 
@@ -60,6 +61,11 @@ Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT s
 | `text\\` | submits `text\\` (even count = literal backslashes) |
 | `text\` + image attached | submits as-is (attachments never swallowed) |
 | headless / RPC submits | untouched — interactive only |
+
+| You press | Result |
+|---|---|
+| `Esc` `Esc` while typing | clears the draft (pair consumed; single `Esc` keeps host behavior) |
+| `Esc` `Esc` on an empty box | untouched — host rewind/tree selector as configured |
 
 Fail-open by design: if there is no live editor to restore into, the submit goes through literally. This extension never eats a message.
 

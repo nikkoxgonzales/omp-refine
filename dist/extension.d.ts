@@ -19,6 +19,10 @@
 interface UiLike {
     setEditorText?: (text: string) => void;
     getEditorText?: () => string;
+    onTerminalInput?: (handler: (data: string) => {
+        consume?: boolean;
+        data?: string;
+    } | undefined) => () => void;
     [key: string]: unknown;
 }
 interface ContextLike {
