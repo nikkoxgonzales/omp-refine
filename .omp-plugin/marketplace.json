@@ -1,0 +1,21 @@
+{
+  "name": "omp-hotkeys",
+  "owner": {
+    "name": "Nikko Gonzales"
+  },
+  "metadata": {
+    "description": "Claude-style hotkeys for omp/pi",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "omp-hotkeys",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Backslash-Enter inserts a newline instead of submitting, on every terminal.",
+      "category": "development",
+      "license": "MIT",
+      "keywords": ["hotkeys", "newline", "multiline", "input", "oh-my-pi"]
+    }
+  ]
+}

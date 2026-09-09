@@ -1,0 +1,53 @@
+{
+  "name": "omp-hotkeys",
+  "version": "0.1.0",
+  "description": "Claude-style hotkeys for Oh My Pi (omp) and pi: backslash-Enter inserts a newline instead of submitting — no terminal CSI gymnastics, works everywhere including Windows Terminal.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/hotkeys.mjs"
+  },
+  "omp": {
+    "extensions": [
+      "./dist/extension.js"
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./dist/extension.js"
+    ]
+  },
+  "keywords": [
+    "oh-my-pi",
+    "pi-coding-agent",
+    "hotkeys",
+    "keybindings",
+    "newline",
+    "multiline",
+    "input"
+  ],
+  "author": "Nikko Gonzales <nikkoxgonzales@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nikkoxgonzales/omp-hotkeys.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "typescript": "^7.0.2"
+  }
+}
