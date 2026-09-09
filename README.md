@@ -27,12 +27,6 @@ omp plugin install omp-hotkeys@omp-hotkeys
 omp plugin install github:nikkoxgonzales/omp-hotkeys
 ```
 
-**From npm** — once published; `omp-hotkeys` is not on npm yet, but the package is npm-ready (`npm publish` after `npm login`):
-
-```sh
-omp plugin install omp-hotkeys
-```
-
 Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT send; you stay in the editor on a new line.
 
 <details>
