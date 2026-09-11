@@ -1,5 +1,5 @@
 /**
- * omp-hotkeys OMP/pi extension entry.
+ * omp-refine OMP/pi extension entry.
  *
  * V1 does one thing: Claude-style `\` + Enter. When an interactive submit
  * ends in an unescaped backslash, the submit is swallowed and the text —
@@ -58,17 +58,17 @@ export function shouldContinue(event: unknown): string | undefined {
   return `${stripContinuation(text)}\n`;
 }
 
-let stopHotkeys: (() => void) | undefined;
+let stopRefine: (() => void) | undefined;
 
 /** True between `agent_start` and `agent_end`/`agent_settled`. */
 let agentBusy = false;
-function disarmHotkeys(): void {
+function disarmRefine(): void {
   try {
-    stopHotkeys?.();
+    stopRefine?.();
   } catch {
     // A stale unsubscribe must never block re-arming or shutdown.
   }
-  stopHotkeys = undefined;
+  stopRefine = undefined;
 }
 
 /**
@@ -76,8 +76,8 @@ function disarmHotkeys(): void {
  * editor. Headless/RPC contexts expose no terminal input — the capability
  * checks skip them silently.
  */
-function armHotkeys(ctx: ContextLike): void {
-  disarmHotkeys();
+function armRefine(ctx: ContextLike): void {
+  disarmRefine();
   const ui = ctx?.ui;
   if (ui === undefined) return;
   if (
@@ -93,13 +93,13 @@ function armHotkeys(ctx: ContextLike): void {
   const setText = ui.setEditorText.bind(ui);
   const subscribe = ui.onTerminalInput.bind(ui);
   try {
-    stopHotkeys = subscribe(createDoubleEscapeHandler({ getText, setText, isBusy: () => agentBusy })) ?? undefined;
+    stopRefine = subscribe(createDoubleEscapeHandler({ getText, setText, isBusy: () => agentBusy })) ?? undefined;
   } catch {
-    stopHotkeys = undefined;
+    stopRefine = undefined;
   }
 }
 
-export default function hotkeysExtension(pi: ExtensionHostLike): void {
+export default function refineExtension(pi: ExtensionHostLike): void {
   pi.on('input', (event, ctx) => {
     const continued = shouldContinue(event);
     if (continued === undefined) return undefined;
@@ -131,15 +131,15 @@ export default function hotkeysExtension(pi: ExtensionHostLike): void {
 
   pi.on('session_start', (_event, ctx) => {
     agentBusy = false;
-    armHotkeys(ctx);
+    armRefine(ctx);
   });
   pi.on('session_switch', (_event, ctx) => {
     agentBusy = false;
-    armHotkeys(ctx);
+    armRefine(ctx);
   });
   pi.on('session_shutdown', () => {
     agentBusy = false;
-    disarmHotkeys();
+    disarmRefine();
   });
   // Busy gate for the interrupt guard: swallow lone-Escape-with-draft only
   // while a run is live. Each in its own try/catch — an older host that

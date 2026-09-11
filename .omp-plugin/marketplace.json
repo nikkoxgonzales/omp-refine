@@ -1,21 +1,21 @@
 {
-  "name": "omp-hotkeys",
+  "name": "omp-refine",
   "owner": {
     "name": "Nikko Gonzales"
   },
   "metadata": {
-    "description": "Claude-style hotkeys for omp/pi",
+    "description": "General refinements for omp/pi (Claude-style hotkeys: backslash-Enter newline, double-Escape clear)",
     "version": "0.3.0"
   },
   "plugins": [
     {
-      "name": "omp-hotkeys",
+      "name": "omp-refine",
       "source": "./",
       "version": "0.3.0",
-      "description": "Backslash-Enter for newline, double-Escape to clear the draft, Escape interrupt guard while streaming.",
+      "description": "OMP refinements: backslash-Enter for newline, double-Escape to clear the draft, Escape interrupt guard while streaming.",
       "category": "development",
       "license": "MIT",
-      "keywords": ["hotkeys", "newline", "multiline", "input", "oh-my-pi"]
+      "keywords": ["refine", "refinements", "newline", "multiline", "input", "oh-my-pi"]
     }
   ]
 }

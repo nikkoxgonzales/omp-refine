@@ -19,13 +19,13 @@ const {
   stripContinuation,
   shouldContinue,
 } = await import('../dist/index.js');
-const { default: hotkeysExtension } = await import('../dist/extension.js');
+const { default: refineExtension } = await import('../dist/extension.js');
 
 /** Install the extension on a fake pi, return the captured input handler. */
 function install(ctx) {
   const handlers = {};
   const pi = { on: (event, handler) => { handlers[event] = handler; } };
-  hotkeysExtension(pi);
+  refineExtension(pi);
   assert.equal(typeof handlers.input, 'function', 'registers an input handler');
   return (event) => handlers.input(event, ctx);
 }

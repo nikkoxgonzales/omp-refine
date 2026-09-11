@@ -1,5 +1,5 @@
 /**
- * omp-hotkeys — public surface (also what the acceptance tests import).
+ * omp-refine — public surface (also what the acceptance tests import).
  */
 export {
   countTrailingBackslashes,

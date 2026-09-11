@@ -19,7 +19,7 @@ const {
   DOUBLE_ESCAPE_MS,
   ESCAPE_KEY,
 } = await import('../dist/index.js');
-const { default: hotkeysExtension } = await import('../dist/extension.js');
+const { default: refineExtension } = await import('../dist/extension.js');
 
 const ESC = ESCAPE_KEY;
 
@@ -180,7 +180,7 @@ describe('double-Escape gesture', () => {
 describe('terminal-input wiring', () => {
   function install(ui) {
     const handlers = {};
-    hotkeysExtension({ on: (event, handler) => { handlers[event] = handler; } });
+    refineExtension({ on: (event, handler) => { handlers[event] = handler; } });
     return handlers;
   }
 
@@ -258,7 +258,7 @@ describe('terminal-input wiring', () => {
       if (event.startsWith('agent_')) throw new Error('unknown event');
       handlers[event] = (...args) => args;
     } };
-    assert.doesNotThrow(() => hotkeysExtension(pi));
+    assert.doesNotThrow(() => refineExtension(pi));
     assert.equal(typeof handlers.input, 'function');
     assert.equal(typeof handlers.session_start, 'function');
   });

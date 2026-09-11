@@ -1,5 +1,5 @@
 /**
- * omp-hotkeys OMP/pi extension entry.
+ * omp-refine OMP/pi extension entry.
  *
  * V1 does one thing: Claude-style `\` + Enter. When an interactive submit
  * ends in an unescaped backslash, the submit is swallowed and the text —
@@ -39,5 +39,5 @@ interface ExtensionHostLike {
  * and non-string payloads always pass through untouched.
  */
 export declare function shouldContinue(event: unknown): string | undefined;
-export default function hotkeysExtension(pi: ExtensionHostLike): void;
+export default function refineExtension(pi: ExtensionHostLike): void;
 export {};

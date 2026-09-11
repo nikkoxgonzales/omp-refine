@@ -1,6 +1,6 @@
-# omp-hotkeys
+# omp-refine
 
-**Claude-style hotkeys for [Oh My Pi](https://github.com/can1357/oh-my-pi) and pi** — `\` + `Enter` for newline, double-`Escape` to clear the draft, `Escape` interrupt guard.
+**General refinements for [Oh My Pi](https://github.com/can1357/oh-my-pi) and pi** — currently: Claude-style hotkeys (`\` + `Enter` for newline, double-`Escape` to clear the draft, `Escape` interrupt guard).
 
 ```text
 hello \<Enter>   keeps editing:  "hello⏎|"   (backslash consumed, no submit)
@@ -18,17 +18,17 @@ triple-<Esc>     clears, then interrupts (third lands on the empty box)
 
 Requirements: Node.js 22+, and omp (`@oh-my-pi/pi-coding-agent`) 18.1.x or pi.
 
-**Marketplace (recommended — enables updates via `omp plugin upgrade omp-hotkeys@omp-hotkeys`):**
+**Marketplace (recommended — enables updates via `omp plugin upgrade omp-refine@omp-refine`):**
 
 ```sh
-omp plugin marketplace add nikkoxgonzales/omp-hotkeys
-omp plugin install omp-hotkeys@omp-hotkeys
+omp plugin marketplace add nikkoxgonzales/omp-refine
+omp plugin install omp-refine@omp-refine
 ```
 
 **Direct from GitHub:**
 
 ```sh
-omp plugin install github:nikkoxgonzales/omp-hotkeys
+omp plugin install github:nikkoxgonzales/omp-refine
 ```
 
 Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT send; you stay in the editor on a new line.
@@ -42,16 +42,16 @@ Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT s
 2. Create a junction (the same mechanism the CLI's marketplace path uses):
 
    ```sh
-   cmd /c mklink /J "%USERPROFILE%\.omp\plugins\node_modules\omp-hotkeys" "C:\path\to\omp-hotkeys"
+   cmd /c mklink /J "%USERPROFILE%\.omp\plugins\node_modules\omp-refine" "C:\path\to\omp-refine"
    ```
 
 3. Add the plugin to `%USERPROFILE%\.omp\plugins\omp-plugins.lock.json`:
 
    ```json
-   { "plugins": { "omp-hotkeys": { "version": "0.3.0", "enabledFeatures": null, "enabled": true } }, "settings": {} }
+   { "plugins": { "omp-refine": { "version": "0.3.0", "enabledFeatures": null, "enabled": true } }, "settings": {} }
    ```
 
-4. `omp plugin list` should show `omp-hotkeys@0.3.0`. Restart omp.
+4. `omp plugin list` should show `omp-refine@0.3.0`. Restart omp.
 
 </details>
 

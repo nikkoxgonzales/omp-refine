@@ -1,7 +1,7 @@
 {
-  "name": "omp-hotkeys",
+  "name": "omp-refine",
   "version": "0.3.0",
-  "description": "Claude-style hotkeys for Oh My Pi (omp) and pi: backslash-Enter inserts a newline instead of submitting, double-Escape clears the draft — no terminal CSI gymnastics, works everywhere including Windows Terminal.",
+  "description": "General refinements for Oh My Pi (omp) and pi: Claude-style hotkeys (backslash-Enter inserts a newline instead of submitting, double-Escape clears the draft) — no terminal CSI gymnastics, works everywhere including Windows Terminal.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/hotkeys.mjs test/double-escape.mjs"
+    "test": "npm run build && node --test test/refine.mjs test/double-escape.mjs"
   },
   "omp": {
     "extensions": [
@@ -34,8 +34,8 @@
   "keywords": [
     "oh-my-pi",
     "pi-coding-agent",
-    "hotkeys",
-    "keybindings",
+    "refine",
+    "refinements",
     "newline",
     "multiline",
     "input"
@@ -43,7 +43,7 @@
   "author": "Nikko Gonzales <nikkoxgonzales@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nikkoxgonzales/omp-hotkeys.git"
+    "url": "https://github.com/nikkoxgonzales/omp-refine.git"
   },
   "license": "MIT",
   "devDependencies": {
