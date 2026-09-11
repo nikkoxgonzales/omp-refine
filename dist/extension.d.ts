@@ -24,6 +24,11 @@
  *   (`C:\new\file` multiline pastes), so the rule never guesses. (pi's own
  *   editor already handles `\` + Enter at the cursor natively; omp submits
  *   unconditionally, which is where this extension is the sole implementer.)
+ *   CURSOR PLACEMENT: the restore passes the splice offset (just after the
+ *   created `"\n"`) as an optional second `setEditorText` arg. Neither host
+ *   honors it today — both funnel into `editor.setText(text)`, which parks
+ *   the cursor at the end — so mid-draft restores land at EOL on current
+ *   hosts; the arg is ignored extra-arg pass-through until a host adopts it.
  *
  * - TRAILING SPACE: `\` + Space + Enter must submit literally. Both hosts
  *   `trim()` the draft before the `input` event fires — and, fatally for
@@ -52,7 +57,7 @@
  * pi, TUI and headless.
  */
 interface UiLike {
-    setEditorText?: (text: string) => void;
+    setEditorText?: (text: string, cursorOffset?: number) => void;
     getEditorText?: () => string;
     onTerminalInput?: (handler: (data: string) => {
         consume?: boolean;

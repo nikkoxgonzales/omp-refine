@@ -10,6 +10,7 @@ export {
   spliceContinuationAt,
   isContinuationLine,
   spliceSoleLineContinuation,
+  spliceSoleLineContinuationWithCursor,
 } from './continuation.js';
 export { shouldContinue, resolveBaseText, readCursorOffset, createSubmitSnapshotTap } from './extension.js';
 export type { SubmitSnapshotDeps } from './extension.js';

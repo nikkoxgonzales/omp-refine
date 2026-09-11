@@ -24,6 +24,11 @@
  *   (`C:\new\file` multiline pastes), so the rule never guesses. (pi's own
  *   editor already handles `\` + Enter at the cursor natively; omp submits
  *   unconditionally, which is where this extension is the sole implementer.)
+ *   CURSOR PLACEMENT: the restore passes the splice offset (just after the
+ *   created `"\n"`) as an optional second `setEditorText` arg. Neither host
+ *   honors it today — both funnel into `editor.setText(text)`, which parks
+ *   the cursor at the end — so mid-draft restores land at EOL on current
+ *   hosts; the arg is ignored extra-arg pass-through until a host adopts it.
  *
  * - TRAILING SPACE: `\` + Space + Enter must submit literally. Both hosts
  *   `trim()` the draft before the `input` event fires — and, fatally for
@@ -52,11 +57,17 @@
  * pi, TUI and headless.
  */
 
-import { spliceSoleLineContinuation, hasContinuation, spliceContinuationAt, stripContinuation } from './continuation.js';
+import { spliceSoleLineContinuationWithCursor, hasContinuation, spliceContinuationAt, stripContinuation } from './continuation.js';
 import { createDoubleEscapeHandler } from './double-escape.js';
 
 interface UiLike {
-  setEditorText?: (text: string) => void;
+  // Optional second arg: 0-based UTF-16 offset into the restored text where
+  // the cursor should land (just after the spliced newline). Neither host
+  // honors it today — omp 18.1.x types it `(text: string) => void` and pi
+  // 0.85.x calls `editor.setText(text)` (cursor anchored to end) — so it is
+  // ignored there (extra args are a no-op in JS) and parks forward-compat
+  // placement for any host that adopts the convention.
+  setEditorText?: (text: string, cursorOffset?: number) => void;
   getEditorText?: () => string;
   onTerminalInput?: (
     handler: (data: string) => { consume?: boolean; data?: string } | undefined,
@@ -271,16 +282,33 @@ export default function refineExtension(pi: ExtensionHostLike): void {
     // splices a newline at the end of THAT line; zero or 2+ candidates
     // submit literally — never guess.
     const at = readCursorOffset(event, base.length);
-    const continued =
-      at !== undefined ? spliceContinuationAt(base, at) : spliceSoleLineContinuation(base);
+    let continued: string | undefined;
+    let cursor: number | undefined;
+    if (at !== undefined) {
+      continued = spliceContinuationAt(base, at);
+      // Remove-one/add-one before the cursor nets zero: `at` is already just
+      // after the spliced `"\n"` (start of the opened line).
+      cursor = at;
+    } else {
+      const spliced = spliceSoleLineContinuationWithCursor(base);
+      continued = spliced?.text;
+      cursor = spliced?.cursor;
+    }
     if (continued === undefined) return undefined;
     // ORDERING: the host runs `editor.clearDraft()` synchronously after
     // `emitInput` resolves handled, so a synchronous restore is wiped —
     // the submit vanishes AND the draft is lost (the reported "clears the
     // text"). A macrotask always lands after that microtask continuation.
+    // CURSOR: the splice offset goes along as an optional second arg (just
+    // after the created newline, where Enter-at-end-of-line would leave the
+    // cursor). Current hosts ignore it — `setText` anchors the cursor to the
+    // end — so mid-draft restores still park at EOL there; the arg is
+    // forward-compat placement, harmless extra-arg pass-through today.
+    const restored = continued;
+    const placedCursor = cursor;
     setTimeout(() => {
       try {
-        ui?.setEditorText?.(continued);
+        ui?.setEditorText?.(restored, placedCursor);
       } catch {
         // Session died mid-tick: nothing left to restore into.
       }

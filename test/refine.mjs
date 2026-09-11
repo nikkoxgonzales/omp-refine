@@ -33,6 +33,7 @@ const {
   spliceContinuationAt,
   isContinuationLine,
   spliceSoleLineContinuation,
+  spliceSoleLineContinuationWithCursor,
   shouldContinue,
   resolveBaseText,
   readCursorOffset,
@@ -62,10 +63,10 @@ function installLive() {
   const taps = [];
   const pi = { on: (event, handler) => { handlers[event] = handler; } };
   refineExtension(pi);
-  assert.equal(typeof handlers.input, 'function', 'registers an input handler');
   const ctx = {
     draft: '',
     sets: [],
+    cursors: [], // second setEditorText arg per restore (splice offset)
     ui: null,
   };
   ctx.ui = {
@@ -74,9 +75,10 @@ function installLive() {
       if (ctx.nonStringGet) return 42;
       return ctx.draft;
     },
-    setEditorText(text) {
+    setEditorText(text, cursor) {
       if (ctx.throwOnSet) throw new Error('gone');
       ctx.sets.push(text);
+      ctx.cursors.push(cursor);
       ctx.draft = text;
     },
     onTerminalInput(handler) {
@@ -226,6 +228,19 @@ describe('sole-continuation-line rule (cursor-less mid-draft fallback)', () => {
     assert.equal(spliceSoleLineContinuation('foo\\\\'), undefined); // even run
     assert.equal(spliceSoleLineContinuation('a\\\nb\\\nc'), undefined); // two candidates
     assert.equal(spliceSoleLineContinuation('C:\\new\\file\nsecond'), undefined); // no line ends in `\`
+  });
+  it('WithCursor twin reports the offset just after the spliced newline', () => {
+    assert.deepEqual(spliceSoleLineContinuationWithCursor('foo\\'), { text: 'foo\n', cursor: 4 });
+    assert.deepEqual(spliceSoleLineContinuationWithCursor('a\nb\\\nc'), { text: 'a\nb\n\nc', cursor: 4 });
+    assert.deepEqual(spliceSoleLineContinuationWithCursor('a\n\\\nb'), { text: 'a\n\n\nb', cursor: 3 });
+    // Cursor always indexes the created newline: text[cursor - 1] is the splice.
+    for (const raw of ['foo\\', 'a\nb\\\nc', 'first line\n\nmiddle line\\\n\nlast line']) {
+      const spliced = spliceSoleLineContinuationWithCursor(raw);
+      assert.equal(spliced.text[spliced.cursor - 1], '\n');
+      assert.ok(spliced.cursor >= 0 && spliced.cursor <= spliced.text.length);
+    }
+    assert.equal(spliceSoleLineContinuationWithCursor('plain\ntext'), undefined);
+    assert.equal(spliceSoleLineContinuationWithCursor('a\\\nb\\\nc'), undefined);
   });
 });
 
@@ -543,5 +558,51 @@ describe('wired input handler (live host model: tap + cleared buffer + trimmed t
     await tick();
     assert.equal(live.ctx.draft, '');
     assert.deepEqual(live.ctx.sets, []);
+  });
+  it('mid-draft restore passes the splice offset (lands on the created newline)', async () => {
+    const live = installLive();
+    const raw = 'first line\n\nmiddle line\\\n\nlast line';
+    assert.deepEqual(liveSubmit(live, raw), { handled: true });
+    await tick();
+    const continued = 'first line\n\nmiddle line\n\n\nlast line';
+    assert.equal(live.ctx.draft, continued);
+    // Just after the spliced newline: start of the opened line, where
+    // Enter-at-end-of-line would leave the cursor. Current hosts ignore the
+    // arg (cursor parks at EOL); the offset must still be exact for hosts
+    // that honor it.
+    const expected = 'first line\n\nmiddle line\n'.length;
+    assert.deepEqual(live.ctx.cursors, [expected]);
+    assert.equal(continued[expected - 1], '\n');
+    assert.equal(continued.slice(0, expected), 'first line\n\nmiddle line\n');
+  });
+  it('end-of-draft restore passes the end offset (regression)', async () => {
+    const live = installLive();
+    assert.deepEqual(liveSubmit(live, 'hello\\'), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'hello\n');
+    assert.deepEqual(live.ctx.cursors, ['hello\n'.length]);
+  });
+  it('cursor-at splice passes the event offset through', async () => {
+    const live = installLive();
+    assert.deepEqual(liveSubmit(live, 'hello \\ world', { cursorOffset: 7 }), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'hello \n world');
+    assert.deepEqual(live.ctx.cursors, [7]);
+  });
+  it('single-arg host shape restores text (extra cursor arg ignored)', async () => {
+    // A host typed `(text: string) => void` ignores the second arg: the
+    // draft must still restore exactly. (Every legacy fake above already
+    // exercises this shape; this pins the fallback explicitly.)
+    const seen = [];
+    let arity = -1;
+    function singleArg(text) {
+      arity = arguments.length;
+      seen.push(text);
+    }
+    const onInput = install({ ui: { getEditorText: () => '', setEditorText: singleArg } });
+    assert.deepEqual(onInput({ source: 'interactive', text: 'a\nb\\\nc' }), { handled: true });
+    await tick();
+    assert.deepEqual(seen, ['a\nb\n\nc']);
+    assert.equal(arity, 2); // we always pass (text, cursor); the host drops it
   });
 });

@@ -79,7 +79,7 @@ export function isContinuationLine(line) {
     return countTrailingBackslashes(line) % 2 === 1;
 }
 /**
- * Cursor-less mid-draft fallback: when the snapshot/base draft has EXACTLY
+ * Cursor-placed mid-draft fallback: when the snapshot/base draft has EXACTLY
  * ONE continuation line (per {@link isContinuationLine}), consume one
  * backslash at the end of THAT line and splice `"\n"` there, preserving
  * head + tail (`"a\nb\\\nc"` → `"a\nb\n\nc"`, the line split open exactly
@@ -89,8 +89,15 @@ export function isContinuationLine(line) {
  * literally. A sole last-line candidate behaves exactly like
  * {@link stripContinuation} plus a newline, so this also covers the
  * end-of-text case.
+ *
+ * Alongside the restored text, returns the cursor offset just after the
+ * spliced `"\n"` (the splice index + 1) — where Enter-at-end-of-line would
+ * leave the cursor (start of the opened line). Offsets are UTF-16 code
+ * units into the returned text, matching the input convention of
+ * {@link spliceContinuationAt} (whose post-splice cursor is likewise the
+ * passed `offset`: remove-one/add-one before the cursor nets zero).
  */
-export function spliceSoleLineContinuation(text) {
+export function spliceSoleLineContinuationWithCursor(text) {
     const lines = text.split('\n');
     let candidate = -1;
     for (let i = 0; i < lines.length; i++) {
@@ -106,7 +113,14 @@ export function spliceSoleLineContinuation(text) {
     for (let i = 0; i < candidate; i++)
         offset += lines[i].length + 1; // +1 for `"\n"`
     offset += lines[candidate].length - 1; // consume exactly one backslash
-    return `${text.slice(0, offset)}\n${text.slice(offset + 1)}`;
+    return { text: `${text.slice(0, offset)}\n${text.slice(offset + 1)}`, cursor: offset + 1 };
+}
+/**
+ * String-only convenience over {@link spliceSoleLineContinuationWithCursor}.
+ * Same rule, no cursor: see above for the contract.
+ */
+export function spliceSoleLineContinuation(text) {
+    return spliceSoleLineContinuationWithCursor(text)?.text;
 }
 /**
  * Strip the single escaping backslash. Returns `text` unchanged when there

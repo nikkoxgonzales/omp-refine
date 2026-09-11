@@ -48,10 +48,10 @@ Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT s
 3. Add the plugin to `%USERPROFILE%\.omp\plugins\omp-plugins.lock.json`:
 
    ```json
-   { "plugins": { "omp-refine": { "version": "0.3.0", "enabledFeatures": null, "enabled": true } }, "settings": {} }
+   { "plugins": { "omp-refine": { "version": "0.4.0", "enabledFeatures": null, "enabled": true } }, "settings": {} }
    ```
 
-4. `omp plugin list` should show `omp-refine@0.3.0`. Restart omp.
+4. `omp plugin list` should show `omp-refine@0.4.0`. Restart omp.
 
 </details>
 
@@ -60,7 +60,7 @@ Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT s
 | You type + `Enter` | Result |
 |---|---|
 | `text\` (cursor at end) | newline, keeps editing (`text⏎`) — the `\` is consumed |
-| `\` + `Enter` with cursor mid-draft (exactly one `\`-ended line) | newline spliced at the end of THAT line, keeps editing — head + tail preserved; when the host reports a cursor offset that governs instead (pi's editor already handles `\`+`Enter` at the cursor natively) |
+| `\` + `Enter` with cursor mid-draft (exactly one `\`-ended line) | newline spliced at the end of THAT line, keeps editing — head + tail preserved; when the host reports a cursor offset that governs instead (pi's editor already handles `\`+`Enter` at the cursor natively). Cursor: the splice offset (just after the created newline) is passed to `setEditorText`, but neither host honors it today — both park the cursor at the end of the draft; exact once a host adopts the arg |
 | `\` + `Enter` with zero or 2+ `\`-ended lines | submits literally — never guesses (`C:\new\file` multiline pastes survive); a trailing space after the `\` also vetoes |
 | `text\` + trailing space | submits literally — any whitespace after the `\` vetoes; decided on a pre-submit draft snapshot, because both hosts trim the draft and clear the editor before the `input` event fires |
 | `text` | submits `text` |
