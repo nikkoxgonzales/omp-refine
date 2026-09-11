@@ -2,9 +2,36 @@
  * omp-refine OMP/pi extension entry.
  *
  * V1 does one thing: Claude-style `\` + Enter. When an interactive submit
- * ends in an unescaped backslash, the submit is swallowed and the text —
+ * carries an unescaped backslash, the submit is swallowed and the text —
  * minus the escaping backslash, plus a newline — is put back into the
- * editor so the user keeps typing on the next line.
+ * editor so the user keeps typing.
+ *
+ * Two subtleties the naive end-of-text check gets wrong:
+ *
+ * - MID-LINE: `\` + Enter must also work with the cursor mid-sentence
+ *   (`"hello \<cursor>world"` → `"hello \nworld"`), not just at the end
+ *   of the draft. Neither host exposes cursor info — `InputEvent` carries
+ *   only `{ type, text, images, source }` (pi adds `streamingBehavior`;
+ *   verified against pi 0.85.x and omp 18.1.x types) and the UI context
+ *   offers only `get/setEditorText`, no selection API — so the handler
+ *   honors a strictly validated cursor offset when the event carries one
+ *   (`cursorOffset`, `cursor`, or `selectionStart`) and otherwise stays
+ *   end-only. A cursor-less interior-backslash heuristic would swallow
+ *   legitimate submits (`C:\new\file`, regex escapes), so end-only is
+ *   the only safe fallback. (pi's own editor already handles `\` + Enter
+ *   at the cursor natively; omp submits unconditionally, which is where
+ *   this extension is the sole implementer.)
+ *
+ * - TRAILING SPACE: `\` + Space + Enter must submit literally. Both hosts
+ *   `trim()` the draft in the editor's submit path before the `input`
+ *   event fires, so `"foo\ "` arrives as `"foo\"` — indistinguishable
+ *   from a genuine continuation by `event.text` alone. The handler
+ *   therefore re-reads the raw draft via `getEditorText()` (still
+ *   populated: the host clears the draft only after the input handlers
+ *   resolve) and decides on the raw text whenever it is recognizably the
+ *   same submission (`event.text === raw.trim()`); a lone fallback to
+ *   `event.text` covers cleared/legacy editors. `"foo\\" ` never
+ *   continues (even run = literal backslashes).
  *
  * Why an input handler and not a keybinding: `\` is an ordinary character
  * and Enter is plain Enter, so this works on every terminal (Windows
@@ -34,10 +61,30 @@ interface ExtensionHostLike {
 }
 /**
  * Pure decision: returns the editor text to restore (`text` minus the
- * escape, plus `"\n"`) when this submit is a continuation, else undefined.
- * Deliberately conservative — non-interactive sources, image attachments,
- * and non-string payloads always pass through untouched.
+ * escape, plus `"\n"`) when this submit is an end-of-text continuation,
+ * else undefined. End-only by construction — the wired handler below
+ * layers the raw-draft check and cursor splicing on top.
  */
 export declare function shouldContinue(event: unknown): string | undefined;
+/**
+ * Pick the text the continuation decision runs on. Both hosts `trim()`
+ * the draft before emitting `input`, which destroys the trailing-space
+ * evidence (`"foo\ "` arrives as `"foo\"`). When the live editor still
+ * holds the raw draft AND it is recognizably the same submission
+ * (`eventText === raw.trim()`), decide on the raw text so whitespace
+ * after the backslash vetoes the continuation. Otherwise (cleared
+ * editor, legacy harness, or an unrelated rewrite by an earlier handler
+ * in the chain) fall back to the event text — never invent whitespace.
+ */
+export declare function resolveBaseText(eventText: string, raw: unknown): string;
+/**
+ * Cursor offset carried by the input event, if any. Neither host reports
+ * one today (`InputEvent` has no cursor field; verified pi 0.85.x / omp
+ * 18.1.x), so this is forward-compat only: accept `cursorOffset`
+ * (preferred), `cursor`, or `selectionStart` when strictly valid — an
+ * integer insertion point inside the text — and ignore everything else.
+ * Unknown shapes never steer a submit.
+ */
+export declare function readCursorOffset(event: unknown, length: number): number | undefined;
 export default function refineExtension(pi: ExtensionHostLike): void;
 export {};

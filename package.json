@@ -19,7 +19,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/refine.mjs test/double-escape.mjs"
+    "test": "npm run build && node --test test/refine.mjs test/double-escape.mjs",
+    "coverage": "npm run build && node --experimental-test-coverage --test test/refine.mjs test/double-escape.mjs"
   },
   "omp": {
     "extensions": [

@@ -2,9 +2,36 @@
  * omp-refine OMP/pi extension entry.
  *
  * V1 does one thing: Claude-style `\` + Enter. When an interactive submit
- * ends in an unescaped backslash, the submit is swallowed and the text —
+ * carries an unescaped backslash, the submit is swallowed and the text —
  * minus the escaping backslash, plus a newline — is put back into the
- * editor so the user keeps typing on the next line.
+ * editor so the user keeps typing.
+ *
+ * Two subtleties the naive end-of-text check gets wrong:
+ *
+ * - MID-LINE: `\` + Enter must also work with the cursor mid-sentence
+ *   (`"hello \<cursor>world"` → `"hello \nworld"`), not just at the end
+ *   of the draft. Neither host exposes cursor info — `InputEvent` carries
+ *   only `{ type, text, images, source }` (pi adds `streamingBehavior`;
+ *   verified against pi 0.85.x and omp 18.1.x types) and the UI context
+ *   offers only `get/setEditorText`, no selection API — so the handler
+ *   honors a strictly validated cursor offset when the event carries one
+ *   (`cursorOffset`, `cursor`, or `selectionStart`) and otherwise stays
+ *   end-only. A cursor-less interior-backslash heuristic would swallow
+ *   legitimate submits (`C:\new\file`, regex escapes), so end-only is
+ *   the only safe fallback. (pi's own editor already handles `\` + Enter
+ *   at the cursor natively; omp submits unconditionally, which is where
+ *   this extension is the sole implementer.)
+ *
+ * - TRAILING SPACE: `\` + Space + Enter must submit literally. Both hosts
+ *   `trim()` the draft in the editor's submit path before the `input`
+ *   event fires, so `"foo\ "` arrives as `"foo\"` — indistinguishable
+ *   from a genuine continuation by `event.text` alone. The handler
+ *   therefore re-reads the raw draft via `getEditorText()` (still
+ *   populated: the host clears the draft only after the input handlers
+ *   resolve) and decides on the raw text whenever it is recognizably the
+ *   same submission (`event.text === raw.trim()`); a lone fallback to
+ *   `event.text` covers cleared/legacy editors. `"foo\\" ` never
+ *   continues (even run = literal backslashes).
  *
  * Why an input handler and not a keybinding: `\` is an ordinary character
  * and Enter is plain Enter, so this works on every terminal (Windows
@@ -16,15 +43,14 @@
  * through the `pi`/`ctx` surfaces below, so this loads cleanly on omp and
  * pi, TUI and headless.
  */
-import { hasContinuation, stripContinuation } from './continuation.js';
+import { hasContinuation, spliceContinuationAt, stripContinuation } from './continuation.js';
 import { createDoubleEscapeHandler } from './double-escape.js';
 /**
- * Pure decision: returns the editor text to restore (`text` minus the
- * escape, plus `"\n"`) when this submit is a continuation, else undefined.
- * Deliberately conservative — non-interactive sources, image attachments,
- * and non-string payloads always pass through untouched.
+ * Shared gate: the submitted text when this is a live interactive submit,
+ * else undefined. Non-interactive sources, image attachments, and
+ * non-string payloads always pass through untouched.
  */
-export function shouldContinue(event) {
+function inputText(event) {
     if (typeof event !== 'object' || event === null)
         return undefined;
     const { source, text, images } = event;
@@ -34,9 +60,55 @@ export function shouldContinue(event) {
         return undefined;
     if (Array.isArray(images) && images.length > 0)
         return undefined;
-    if (!hasContinuation(text))
+    return text;
+}
+/**
+ * Pure decision: returns the editor text to restore (`text` minus the
+ * escape, plus `"\n"`) when this submit is an end-of-text continuation,
+ * else undefined. End-only by construction — the wired handler below
+ * layers the raw-draft check and cursor splicing on top.
+ */
+export function shouldContinue(event) {
+    const text = inputText(event);
+    if (text === undefined || !hasContinuation(text))
         return undefined;
     return `${stripContinuation(text)}\n`;
+}
+/**
+ * Pick the text the continuation decision runs on. Both hosts `trim()`
+ * the draft before emitting `input`, which destroys the trailing-space
+ * evidence (`"foo\ "` arrives as `"foo\"`). When the live editor still
+ * holds the raw draft AND it is recognizably the same submission
+ * (`eventText === raw.trim()`), decide on the raw text so whitespace
+ * after the backslash vetoes the continuation. Otherwise (cleared
+ * editor, legacy harness, or an unrelated rewrite by an earlier handler
+ * in the chain) fall back to the event text — never invent whitespace.
+ */
+export function resolveBaseText(eventText, raw) {
+    if (typeof raw === 'string' && raw.length > 0 && raw !== eventText && eventText === raw.trim()) {
+        return raw;
+    }
+    return eventText;
+}
+/**
+ * Cursor offset carried by the input event, if any. Neither host reports
+ * one today (`InputEvent` has no cursor field; verified pi 0.85.x / omp
+ * 18.1.x), so this is forward-compat only: accept `cursorOffset`
+ * (preferred), `cursor`, or `selectionStart` when strictly valid — an
+ * integer insertion point inside the text — and ignore everything else.
+ * Unknown shapes never steer a submit.
+ */
+export function readCursorOffset(event, length) {
+    if (typeof event !== 'object' || event === null)
+        return undefined;
+    const record = event;
+    for (const key of ['cursorOffset', 'cursor', 'selectionStart']) {
+        const value = record[key];
+        if (Number.isInteger(value) && value > 0 && value <= length) {
+            return value;
+        }
+    }
+    return undefined;
 }
 let stopRefine;
 /** True between `agent_start` and `agent_end`/`agent_settled`. */
@@ -79,24 +151,39 @@ function armRefine(ctx) {
 }
 export default function refineExtension(pi) {
     pi.on('input', (event, ctx) => {
-        const continued = shouldContinue(event);
-        if (continued === undefined)
+        const text = inputText(event);
+        if (text === undefined)
             return undefined;
         // Fail OPEN: without a live editor (headless/RPC, or a host that does
         // not expose the editor surface) a swallowed submit would eat the
         // user's message — so submit literally instead. The read below probes
-        // liveness while the submit can still proceed.
+        // liveness while the submit can still proceed, and doubles as the raw
+        // draft for the trim check (hosts trim before emitting `input`).
         const ui = ctx?.ui;
         if (ui === undefined)
             return undefined;
         if (typeof ui.setEditorText !== 'function' || typeof ui.getEditorText !== 'function')
             return undefined;
+        let raw;
         try {
-            ui.getEditorText();
+            raw = ui.getEditorText();
         }
         catch {
             return undefined;
         }
+        const base = resolveBaseText(text, raw);
+        // A reported cursor position governs: splice at the cursor, or submit
+        // literally when Enter wasn't pressed after an unescaped backslash —
+        // even if the draft happens to end in one. Without cursor info (both
+        // hosts today) fall back to the end-of-text check.
+        const at = readCursorOffset(event, base.length);
+        const continued = at !== undefined
+            ? spliceContinuationAt(base, at)
+            : hasContinuation(base)
+                ? `${stripContinuation(base)}\n`
+                : undefined;
+        if (continued === undefined)
+            return undefined;
         // ORDERING: the host runs `editor.clearDraft()` synchronously after
         // `emitInput` resolves handled, so a synchronous restore is wiped —
         // the submit vanishes AND the draft is lost (the reported "clears the

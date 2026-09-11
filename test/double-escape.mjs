@@ -268,4 +268,19 @@ describe('terminal-input wiring', () => {
     assert.doesNotThrow(() => handlers.session_switch({}, { ui: {} }));
     assert.doesNotThrow(() => handlers.session_shutdown());
   });
+  it('throwing unsubscribe never blocks re-arm or shutdown', () => {
+    const { ui } = fakeUi();
+    ui.onTerminalInput = () => () => { throw new Error('stale'); };
+    const handlers = install(ui);
+    handlers.session_start({}, { ui });
+    assert.doesNotThrow(() => handlers.session_switch({}, { ui }));
+    assert.doesNotThrow(() => handlers.session_shutdown());
+  });
+  it('throwing subscribe leaves the guard disarmed without throwing', () => {
+    const { ui } = fakeUi();
+    ui.onTerminalInput = () => { throw new Error('no terminal'); };
+    const handlers = install(ui);
+    assert.doesNotThrow(() => handlers.session_start({}, { ui }));
+    assert.doesNotThrow(() => handlers.session_shutdown());
+  });
 });

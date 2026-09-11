@@ -3,10 +3,13 @@
  */
 export {
   countTrailingBackslashes,
+  countBackslashesBefore,
   hasContinuation,
+  hasContinuationAt,
   stripContinuation,
+  spliceContinuationAt,
 } from './continuation.js';
-export { shouldContinue } from './extension.js';
+export { shouldContinue, resolveBaseText, readCursorOffset } from './extension.js';
 export {
   createDoubleEscapeHandler,
   DOUBLE_ESCAPE_MS,

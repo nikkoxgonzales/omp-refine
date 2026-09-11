@@ -2,10 +2,17 @@
  * Backslash-Enter continuation: the pure decision logic.
  *
  * Claude Code turns a trailing `\` + Enter into a newline instead of a
- * submit. This module answers the only question that matters — "does this
- * submitted text end in an UNESCAPED backslash?" — by counting trailing
- * backslashes: odd means the last one escapes the submit, even means the
- * backslashes escape each other and the submit stands.
+ * submit. The end-of-text question — "does this submitted text end in an
+ * UNESCAPED backslash?" — is answered by counting trailing backslashes:
+ * odd means the last one escapes the submit, even means the backslashes
+ * escape each other and the submit stands.
+ *
+ * The cursor-aware variants below answer the same question at an arbitrary
+ * insertion point, for `\` + Enter with the cursor mid-line: only the run
+ * immediately before the cursor matters, and exactly one `\` is consumed
+ * with the newline spliced in at the cursor (head and tail preserved).
+ * Offsets are UTF-16 code units into the same string that is spliced, so
+ * callers must validate them against that exact string.
  */
 /** Number of consecutive `\` characters at the end of `text`. */
 export declare function countTrailingBackslashes(text: string): number;
@@ -15,6 +22,28 @@ export declare function countTrailingBackslashes(text: string): number;
  * escape hatch for a literal trailing backslash.
  */
 export declare function hasContinuation(text: string): boolean;
+/**
+ * Number of consecutive `\` characters immediately before `offset`
+ * (an insertion point: 0 means "before the first char"). Out-of-range or
+ * non-integer offsets carry no cursor meaning, so they count 0 (fail open).
+ */
+export declare function countBackslashesBefore(text: string, offset: number): number;
+/**
+ * True when Enter at `offset` should become a newline: exactly when the
+ * run immediately before the cursor is odd (`hello \<cursor>world`).
+ * Offset 0 can never continue (no char before the cursor); invalid
+ * offsets are false. Note `hasContinuation(text)` is this at
+ * `offset === text.length`.
+ */
+export declare function hasContinuationAt(text: string, offset: number): boolean;
+/**
+ * Splice the continuation into `text` at `offset`: consume exactly one
+ * `\` before the cursor and insert `"\n"` there, preserving head + tail
+ * (`"hello \\ world"`, 7 → `"hello \n world"`). Returns undefined when
+ * there is no continuation at the offset (even run, non-backslash before
+ * the cursor, or an invalid offset) so the submit passes through.
+ */
+export declare function spliceContinuationAt(text: string, offset: number): string | undefined;
 /**
  * Strip the single escaping backslash. Returns `text` unchanged when there
  * is no continuation. The caller appends the `"\n"`.
