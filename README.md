@@ -48,10 +48,10 @@ Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT s
 3. Add the plugin to `%USERPROFILE%\.omp\plugins\omp-plugins.lock.json`:
 
    ```json
-   { "plugins": { "omp-refine": { "version": "0.4.0", "enabledFeatures": null, "enabled": true } }, "settings": {} }
+   { "plugins": { "omp-refine": { "version": "0.4.1", "enabledFeatures": null, "enabled": true } }, "settings": {} }
    ```
 
-4. `omp plugin list` should show `omp-refine@0.4.0`. Restart omp.
+4. `omp plugin list` should show `omp-refine@0.4.1`. Restart omp.
 
 </details>
 

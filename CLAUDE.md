@@ -73,3 +73,20 @@ omp plugin install github:nikkoxgonzales/omp-refine
 ```
 
 Then verify the marker grep, and tell the user to restart omp.
+
+## Negative results (do not retry)
+
+**Tap-rewrite for `\`+Enter — refuted.** A tap cannot express
+delete-backward + newline as one rewritten chunk. `editor.ts #handleInputChunk`
+runs `parseKey` exactly once per delivered chunk; a multi-char control chunk
+falls through to `extractPrintableText`, which returns `undefined`. Measured:
+`parseKey('\x7f\n') === undefined` — the `Enter` would be silently eaten, a
+fail-open violation. Sequential live keystrokes would work, but a tap returns a
+single `{data}`.
+
+`setEditorText`'s cursor argument is already passed forward-compatibly; no host
+honors it yet. Upstream fixes that would actually work:
+
+- **(a)** omp adopts pi's submit-branch backslash check — 3 lines mirroring pi:
+  `if (cursorCol > 0 && line[cursorCol-1] === '\\') { handleBackspace(); addNewLine(); return; }`
+- **(b)** omp honors the staged `setEditorText` cursor argument.

@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "General refinements for omp/pi (Claude-style hotkeys: backslash-Enter newline, double-Escape clear)",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "plugins": [
     {
       "name": "omp-refine",
       "source": "./",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "description": "OMP refinements: backslash-Enter for newline, double-Escape to clear the draft, Escape interrupt guard while streaming.",
       "category": "development",
       "license": "MIT",
