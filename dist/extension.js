@@ -8,19 +8,22 @@
  *
  * Two subtleties the naive end-of-text check gets wrong:
  *
- * - MID-LINE: `\` + Enter must also work with the cursor mid-sentence
- *   (`"hello \<cursor>world"` → `"hello \nworld"`), not just at the end
- *   of the draft. Neither host exposes cursor info — `InputEvent` carries
+ * - MID-LINE: `\` + Enter must also work with the cursor mid-draft
+ *   (`"first \<cursor>last"` → `"first \nlast"`), not just at the end of
+ *   the draft. Neither host exposes cursor info — `InputEvent` carries
  *   only `{ type, text, images, source }` (pi adds `streamingBehavior`;
  *   verified against pi 0.85.x and omp 18.1.x types) and the UI context
  *   offers only `get/setEditorText`, no selection API — so the handler
  *   honors a strictly validated cursor offset when the event carries one
- *   (`cursorOffset`, `cursor`, or `selectionStart`) and otherwise stays
- *   end-only. A cursor-less interior-backslash heuristic would swallow
- *   legitimate submits (`C:\new\file`, regex escapes), so end-only is
- *   the only safe fallback. (pi's own editor already handles `\` + Enter
- *   at the cursor natively; omp submits unconditionally, which is where
- *   this extension is the sole implementer.)
+ *   (`cursorOffset`, `cursor`, or `selectionStart`) and otherwise applies
+ *   the exactly-one-candidate-line rule to the pre-submit snapshot: one
+ *   line ending in an odd backslash run (trailing whitespace on the line
+ *   disqualifies it) splices a newline at the end of THAT line, with head
+ *   + tail preserved. Zero or 2+ such lines submit literally — a
+ *   cursor-less interior-backslash guess would swallow legitimate submits
+ *   (`C:\new\file` multiline pastes), so the rule never guesses. (pi's own
+ *   editor already handles `\` + Enter at the cursor natively; omp submits
+ *   unconditionally, which is where this extension is the sole implementer.)
  *
  * - TRAILING SPACE: `\` + Space + Enter must submit literally. Both hosts
  *   `trim()` the draft before the `input` event fires — and, fatally for
@@ -48,7 +51,7 @@
  * through the `pi`/`ctx` surfaces below, so this loads cleanly on omp and
  * pi, TUI and headless.
  */
-import { hasContinuation, spliceContinuationAt, stripContinuation } from './continuation.js';
+import { spliceSoleLineContinuation, hasContinuation, spliceContinuationAt, stripContinuation } from './continuation.js';
 import { createDoubleEscapeHandler } from './double-escape.js';
 /**
  * Shared gate: the submitted text when this is a live interactive submit,
@@ -238,13 +241,12 @@ export default function refineExtension(pi) {
         // A reported cursor position governs: splice at the cursor, or submit
         // literally when Enter wasn't pressed after an unescaped backslash —
         // even if the draft happens to end in one. Without cursor info (both
-        // hosts today) fall back to the end-of-text check.
+        // hosts today) apply the exactly-one-candidate-line rule to the base
+        // draft: one line ending in an odd backslash run (no trailing space)
+        // splices a newline at the end of THAT line; zero or 2+ candidates
+        // submit literally — never guess.
         const at = readCursorOffset(event, base.length);
-        const continued = at !== undefined
-            ? spliceContinuationAt(base, at)
-            : hasContinuation(base)
-                ? `${stripContinuation(base)}\n`
-                : undefined;
+        const continued = at !== undefined ? spliceContinuationAt(base, at) : spliceSoleLineContinuation(base);
         if (continued === undefined)
             return undefined;
         // ORDERING: the host runs `editor.clearDraft()` synchronously after

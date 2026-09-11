@@ -31,6 +31,8 @@ const {
   hasContinuationAt,
   stripContinuation,
   spliceContinuationAt,
+  isContinuationLine,
+  spliceSoleLineContinuation,
   shouldContinue,
   resolveBaseText,
   readCursorOffset,
@@ -196,6 +198,34 @@ describe('cursor-aware continuation', () => {
     assert.equal(spliceContinuationAt('a\\\\b', 3), undefined); // even run passes through
     assert.equal(spliceContinuationAt('hello', 2), undefined);
     assert.equal(spliceContinuationAt('foo\\', 0), undefined);
+  });
+});
+
+describe('sole-continuation-line rule (cursor-less mid-draft fallback)', () => {
+  it('isContinuationLine: odd run continues, whitespace/even/empty veto', () => {
+    assert.equal(isContinuationLine('middle line\\'), true);
+    assert.equal(isContinuationLine('\\'), true);
+    assert.equal(isContinuationLine('foo\\\\\\'), true);
+    assert.equal(isContinuationLine('middle line\\ '), false); // trailing space vetoes
+    assert.equal(isContinuationLine('middle line\\\t'), false); // trailing tab vetoes
+    assert.equal(isContinuationLine('foo\\\\'), false); // even run: literal
+    assert.equal(isContinuationLine('plain line'), false);
+    assert.equal(isContinuationLine(''), false);
+  });
+  it('spliceSoleLineContinuation splices at the sole candidate, head + tail preserved', () => {
+    assert.equal(spliceSoleLineContinuation('first line\nmiddle line\\\nlast line'), 'first line\nmiddle line\n\nlast line');
+    assert.equal(spliceSoleLineContinuation('first line\n\\\nlast line'), 'first line\n\n\nlast line');
+    assert.equal(spliceSoleLineContinuation('foo\\'), 'foo\n'); // sole last line == end check
+    assert.equal(spliceSoleLineContinuation('a\nb\\'), 'a\nb\n');
+    assert.equal(spliceSoleLineContinuation('first line\n\nmiddle line\\\n\nlast line'), 'first line\n\nmiddle line\n\n\nlast line');
+  });
+  it('spliceSoleLineContinuation never guesses: zero or 2+ candidates submit', () => {
+    assert.equal(spliceSoleLineContinuation('plain\ntext'), undefined);
+    assert.equal(spliceSoleLineContinuation(''), undefined);
+    assert.equal(spliceSoleLineContinuation('foo\\ '), undefined); // trailing-space veto
+    assert.equal(spliceSoleLineContinuation('foo\\\\'), undefined); // even run
+    assert.equal(spliceSoleLineContinuation('a\\\nb\\\nc'), undefined); // two candidates
+    assert.equal(spliceSoleLineContinuation('C:\\new\\file\nsecond'), undefined); // no line ends in `\`
   });
 });
 
@@ -452,7 +482,7 @@ describe('wired input handler (live host model: tap + cleared buffer + trimmed t
     await tick();
     assert.equal(live.ctx.draft, 'foo\n');
   });
-  it('invalid cursor offset falls back to the end-of-text check', async () => {
+  it('invalid cursor offset falls back to the sole-line rule (covers end-of-text)', async () => {
     const live = installLive();
     assert.deepEqual(liveSubmit(live, 'foo\\', { cursorOffset: 99 }), { handled: true });
     await tick();
@@ -466,5 +496,52 @@ describe('wired input handler (live host model: tap + cleared buffer + trimmed t
     assert.equal(onInput({ source: 'interactive', text: 'direct\\' }), undefined); // veto via factory snapshot
     await tick();
     assert.deepEqual(seen, []);
+  });
+  it('mid-draft trailing backslash splices a newline at that line, keeps editing', async () => {
+    const live = installLive();
+    const raw = 'first line\n\nmiddle line\\\n\nlast line';
+    assert.deepEqual(liveSubmit(live, raw), { handled: true });
+    assert.equal(live.ctx.draft, ''); // restore is deferred past host clearDraft
+    await tick();
+    assert.equal(live.ctx.draft, 'first line\n\nmiddle line\n\n\nlast line');
+  });
+  it('mid-draft lone-backslash line splices a newline, keeps editing', async () => {
+    const live = installLive();
+    const raw = 'first line\n\n\\\n\nlast line';
+    assert.deepEqual(liveSubmit(live, raw), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'first line\n\n\n\n\nlast line');
+  });
+  it('mid-draft trailing-space candidate submits literally', async () => {
+    const live = installLive();
+    assert.equal(liveSubmit(live, 'first line\nmiddle line\\ \nlast line'), undefined);
+    await tick();
+    assert.equal(live.ctx.draft, '');
+    assert.deepEqual(live.ctx.sets, []);
+  });
+  it('mid-draft even-run candidate submits literally', async () => {
+    const live = installLive();
+    assert.equal(liveSubmit(live, 'first line\nmiddle line\\\\\nlast line'), undefined);
+    await tick();
+    assert.equal(live.ctx.draft, '');
+    assert.deepEqual(live.ctx.sets, []);
+  });
+  it('mid-draft two candidates submit literally (never guess)', async () => {
+    const live = installLive();
+    assert.equal(liveSubmit(live, 'first\\\nsecond\\\nthird'), undefined);
+    await tick();
+    assert.equal(live.ctx.draft, '');
+    assert.deepEqual(live.ctx.sets, []);
+  });
+  it('reported cursor at end governs: mid-draft candidate submits literally', async () => {
+    const live = installLive();
+    const raw = 'first line\\\nlast line';
+    live.ctx.draft = raw;
+    live.terminal('\r');
+    live.ctx.draft = '';
+    assert.equal(live.onInput({ source: 'interactive', text: raw.trim(), cursorOffset: raw.length }), undefined);
+    await tick();
+    assert.equal(live.ctx.draft, '');
+    assert.deepEqual(live.ctx.sets, []);
   });
 });

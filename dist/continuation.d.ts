@@ -45,6 +45,27 @@ export declare function hasContinuationAt(text: string, offset: number): boolean
  */
 export declare function spliceContinuationAt(text: string, offset: number): string | undefined;
 /**
+ * True when a single draft line (no `"\n"` in it) ends in an UNESCAPED
+ * backslash: an odd trailing run with nothing after it. Any trailing
+ * whitespace disqualifies the line — the pre-submit snapshot preserves it,
+ * so `"foo\ "` vetoes while `"foo\"` continues. Even runs (`"foo\\"`)
+ * are the literal-backslash escape hatch.
+ */
+export declare function isContinuationLine(line: string): boolean;
+/**
+ * Cursor-less mid-draft fallback: when the snapshot/base draft has EXACTLY
+ * ONE continuation line (per {@link isContinuationLine}), consume one
+ * backslash at the end of THAT line and splice `"\n"` there, preserving
+ * head + tail (`"a\nb\\\nc"` → `"a\nb\n\nc"`, the line split open exactly
+ * as Enter at end-of-line would; a lone-`\` line `"a\n\\\nb"` →
+ * `"a\n\n\nb"`). Returns undefined for zero or 2+ candidates — never
+ * guess: multiline pastes like `C:\new\file` shapes must submit
+ * literally. A sole last-line candidate behaves exactly like
+ * {@link stripContinuation} plus a newline, so this also covers the
+ * end-of-text case.
+ */
+export declare function spliceSoleLineContinuation(text: string): string | undefined;
+/**
  * Strip the single escaping backslash. Returns `text` unchanged when there
  * is no continuation. The caller appends the `"\n"`.
  */

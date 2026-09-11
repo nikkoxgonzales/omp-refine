@@ -67,6 +67,48 @@ export function spliceContinuationAt(text, offset) {
     return `${text.slice(0, offset - 1)}\n${text.slice(offset)}`;
 }
 /**
+ * True when a single draft line (no `"\n"` in it) ends in an UNESCAPED
+ * backslash: an odd trailing run with nothing after it. Any trailing
+ * whitespace disqualifies the line — the pre-submit snapshot preserves it,
+ * so `"foo\ "` vetoes while `"foo\"` continues. Even runs (`"foo\\"`)
+ * are the literal-backslash escape hatch.
+ */
+export function isContinuationLine(line) {
+    if (line.length === 0 || /\s$/.test(line))
+        return false;
+    return countTrailingBackslashes(line) % 2 === 1;
+}
+/**
+ * Cursor-less mid-draft fallback: when the snapshot/base draft has EXACTLY
+ * ONE continuation line (per {@link isContinuationLine}), consume one
+ * backslash at the end of THAT line and splice `"\n"` there, preserving
+ * head + tail (`"a\nb\\\nc"` → `"a\nb\n\nc"`, the line split open exactly
+ * as Enter at end-of-line would; a lone-`\` line `"a\n\\\nb"` →
+ * `"a\n\n\nb"`). Returns undefined for zero or 2+ candidates — never
+ * guess: multiline pastes like `C:\new\file` shapes must submit
+ * literally. A sole last-line candidate behaves exactly like
+ * {@link stripContinuation} plus a newline, so this also covers the
+ * end-of-text case.
+ */
+export function spliceSoleLineContinuation(text) {
+    const lines = text.split('\n');
+    let candidate = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (!isContinuationLine(lines[i]))
+            continue;
+        if (candidate !== -1)
+            return undefined;
+        candidate = i;
+    }
+    if (candidate === -1)
+        return undefined;
+    let offset = 0;
+    for (let i = 0; i < candidate; i++)
+        offset += lines[i].length + 1; // +1 for `"\n"`
+    offset += lines[candidate].length - 1; // consume exactly one backslash
+    return `${text.slice(0, offset)}\n${text.slice(offset + 1)}`;
+}
+/**
  * Strip the single escaping backslash. Returns `text` unchanged when there
  * is no continuation. The caller appends the `"\n"`.
  */
