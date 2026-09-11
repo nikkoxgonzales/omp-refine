@@ -23,15 +23,20 @@
  *   this extension is the sole implementer.)
  *
  * - TRAILING SPACE: `\` + Space + Enter must submit literally. Both hosts
- *   `trim()` the draft in the editor's submit path before the `input`
- *   event fires, so `"foo\ "` arrives as `"foo\"` — indistinguishable
- *   from a genuine continuation by `event.text` alone. The handler
- *   therefore re-reads the raw draft via `getEditorText()` (still
- *   populated: the host clears the draft only after the input handlers
- *   resolve) and decides on the raw text whenever it is recognizably the
- *   same submission (`event.text === raw.trim()`); a lone fallback to
- *   `event.text` covers cleared/legacy editors. `"foo\\" ` never
- *   continues (even run = literal backslashes).
+ *   `trim()` the draft before the `input` event fires — and, fatally for
+ *   any check inside the `input` handler, the editor buffer is ALREADY
+ *   cleared by then (pi-tui `editor.ts` `#submitValue` joins + trims, resets
+ *   its state, and only then calls `onSubmit`; omp's `input-controller`
+ *   trims again before `emitInput`). So `"foo\ "` arrives as `"foo\"` with
+ *   `getEditorText()` returning `""` — indistinguishable from a genuine
+ *   continuation by anything the `input` handler can observe. The handler
+ *   therefore decides on a pre-submit snapshot of the raw draft, captured
+ *   by a terminal-input tap (listeners run before the focused editor, so
+ *   the tap sees the draft verbatim, trailing spaces included) and
+ *   consumed by the next `input` event. A snapshot is honored only when
+ *   recognizably the same submission (`snapshot.trim() === event.text`);
+ *   anything else falls back to the live editor, then the event text.
+ *   `"foo\\" ` never continues (even run = literal backslashes).
  *
  * Why an input handler and not a keybinding: `\` is an ordinary character
  * and Enter is plain Enter, so this works on every terminal (Windows
@@ -77,12 +82,13 @@ export function shouldContinue(event) {
 /**
  * Pick the text the continuation decision runs on. Both hosts `trim()`
  * the draft before emitting `input`, which destroys the trailing-space
- * evidence (`"foo\ "` arrives as `"foo\"`). When the live editor still
- * holds the raw draft AND it is recognizably the same submission
- * (`eventText === raw.trim()`), decide on the raw text so whitespace
- * after the backslash vetoes the continuation. Otherwise (cleared
- * editor, legacy harness, or an unrelated rewrite by an earlier handler
- * in the chain) fall back to the event text — never invent whitespace.
+ * evidence (`"foo\ "` arrives as `"foo\"`). When `raw` — the pre-submit
+ * snapshot first, the live editor second — still holds the raw draft AND
+ * it is recognizably the same submission (`eventText === raw.trim()`),
+ * decide on the raw text so whitespace after the backslash vetoes the
+ * continuation. Otherwise (consumed/cleared snapshot, cleared editor, or
+ * an unrelated rewrite by an earlier handler in the chain) fall back to
+ * the event text — never invent whitespace.
  */
 export function resolveBaseText(eventText, raw) {
     if (typeof raw === 'string' && raw.length > 0 && raw !== eventText && eventText === raw.trim()) {
@@ -110,6 +116,43 @@ export function readCursorOffset(event, length) {
     }
     return undefined;
 }
+/**
+ * Raw draft as of the last terminal-input chunk, for the trailing-space
+ * veto. The tap below refreshes this on every chunk (one join per chunk —
+ * the host already joins several times per keystroke), so when the submit
+ * Enter arrives the snapshot is the verbatim pre-submit draft. Consumed
+ * (cleared) by the next `input` event; a submit that arrives with no
+ * terminal chunk in between (programmatic `submit()`) finds no snapshot
+ * and falls back to the live editor / event text. Session-scoped: reset
+ * on every arm/disarm below so a stale draft never leaks across sessions.
+ */
+let pendingRawDraft;
+function takePendingRawDraft() {
+    const snapshot = pendingRawDraft;
+    pendingRawDraft = undefined;
+    return snapshot;
+}
+/**
+ * Terminal-input tap factory. Records the live draft verbatim and never
+ * consumes or rewrites input (always returns undefined), so headless/RPC
+ * contexts, image submits, and every other gesture pass through untouched.
+ * Throw-safe: a dead editor keeps the previous snapshot and the `input`
+ * handler fails open downstream.
+ */
+export function createSubmitSnapshotTap(deps) {
+    return (_data) => {
+        try {
+            const draft = deps.getText();
+            if (typeof draft === 'string')
+                pendingRawDraft = draft;
+        }
+        catch {
+            // Dead editor mid-chunk: keep the previous snapshot (if any); the
+            // input handler's recognizability check fails open without one.
+        }
+        return undefined;
+    };
+}
 let stopRefine;
 /** True between `agent_start` and `agent_end`/`agent_settled`. */
 let agentBusy = false;
@@ -121,11 +164,13 @@ function disarmRefine() {
         // A stale unsubscribe must never block re-arming or shutdown.
     }
     stopRefine = undefined;
+    pendingRawDraft = undefined;
 }
 /**
- * (Re)subscribe the double-Escape raw-input listener for this session's
- * editor. Headless/RPC contexts expose no terminal input — the capability
- * checks skip them silently.
+ * (Re)subscribe the session's single raw-input listener for this session's
+ * editor: it snapshots the draft for the continuation veto, then runs the
+ * double-Escape gesture. Headless/RPC contexts expose no terminal input —
+ * the capability checks skip them silently.
  */
 function armRefine(ctx) {
     disarmRefine();
@@ -142,8 +187,17 @@ function armRefine(ctx) {
     const getText = ui.getEditorText.bind(ui);
     const setText = ui.setEditorText.bind(ui);
     const subscribe = ui.onTerminalInput.bind(ui);
+    // One listener, two jobs: the snapshot tap never consumes (always
+    // undefined), so the combined contract is the gesture's. Snapshot first
+    // so even a consumed Escape leaves a fresh draft behind.
+    const snapshot = createSubmitSnapshotTap({ getText });
+    const escape = createDoubleEscapeHandler({ getText, setText, isBusy: () => agentBusy });
+    const combined = (data) => {
+        snapshot(data);
+        return escape(data);
+    };
     try {
-        stopRefine = subscribe(createDoubleEscapeHandler({ getText, setText, isBusy: () => agentBusy })) ?? undefined;
+        stopRefine = subscribe(combined) ?? undefined;
     }
     catch {
         stopRefine = undefined;
@@ -156,22 +210,31 @@ export default function refineExtension(pi) {
             return undefined;
         // Fail OPEN: without a live editor (headless/RPC, or a host that does
         // not expose the editor surface) a swallowed submit would eat the
-        // user's message — so submit literally instead. The read below probes
-        // liveness while the submit can still proceed, and doubles as the raw
-        // draft for the trim check (hosts trim before emitting `input`).
+        // user's message — so submit literally instead. The reads below probe
+        // liveness while the submit can still proceed, and supply the raw
+        // draft for the trim check.
+        //
+        // ORDER OF EVIDENCE (freshest first): the pre-submit snapshot wins —
+        // the live editor is already cleared by now (the host joins + trims
+        // the draft, resets its buffer, and only then emits `input`), so a
+        // live read is always `""` on both hosts and can never veto. The live
+        // read stays as the middle fallback for hosts that don't clear; the
+        // event text is the last resort. Each layer applies only when
+        // recognizably the same submission (`candidate.trim() === text`).
         const ui = ctx?.ui;
         if (ui === undefined)
             return undefined;
         if (typeof ui.setEditorText !== 'function' || typeof ui.getEditorText !== 'function')
             return undefined;
-        let raw;
+        let live;
         try {
-            raw = ui.getEditorText();
+            live = ui.getEditorText();
         }
         catch {
+            // Unreadable editor: trust nothing (not even the snapshot) — submit.
             return undefined;
         }
-        const base = resolveBaseText(text, raw);
+        const base = resolveBaseText(resolveBaseText(text, takePendingRawDraft()), live);
         // A reported cursor position governs: splice at the cursor, or submit
         // literally when Enter wasn't pressed after an unescaped backslash —
         // even if the draft happens to end in one. Without cursor info (both

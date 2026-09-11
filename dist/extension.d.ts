@@ -23,15 +23,20 @@
  *   this extension is the sole implementer.)
  *
  * - TRAILING SPACE: `\` + Space + Enter must submit literally. Both hosts
- *   `trim()` the draft in the editor's submit path before the `input`
- *   event fires, so `"foo\ "` arrives as `"foo\"` — indistinguishable
- *   from a genuine continuation by `event.text` alone. The handler
- *   therefore re-reads the raw draft via `getEditorText()` (still
- *   populated: the host clears the draft only after the input handlers
- *   resolve) and decides on the raw text whenever it is recognizably the
- *   same submission (`event.text === raw.trim()`); a lone fallback to
- *   `event.text` covers cleared/legacy editors. `"foo\\" ` never
- *   continues (even run = literal backslashes).
+ *   `trim()` the draft before the `input` event fires — and, fatally for
+ *   any check inside the `input` handler, the editor buffer is ALREADY
+ *   cleared by then (pi-tui `editor.ts` `#submitValue` joins + trims, resets
+ *   its state, and only then calls `onSubmit`; omp's `input-controller`
+ *   trims again before `emitInput`). So `"foo\ "` arrives as `"foo\"` with
+ *   `getEditorText()` returning `""` — indistinguishable from a genuine
+ *   continuation by anything the `input` handler can observe. The handler
+ *   therefore decides on a pre-submit snapshot of the raw draft, captured
+ *   by a terminal-input tap (listeners run before the focused editor, so
+ *   the tap sees the draft verbatim, trailing spaces included) and
+ *   consumed by the next `input` event. A snapshot is honored only when
+ *   recognizably the same submission (`snapshot.trim() === event.text`);
+ *   anything else falls back to the live editor, then the event text.
+ *   `"foo\\" ` never continues (even run = literal backslashes).
  *
  * Why an input handler and not a keybinding: `\` is an ordinary character
  * and Enter is plain Enter, so this works on every terminal (Windows
@@ -69,12 +74,13 @@ export declare function shouldContinue(event: unknown): string | undefined;
 /**
  * Pick the text the continuation decision runs on. Both hosts `trim()`
  * the draft before emitting `input`, which destroys the trailing-space
- * evidence (`"foo\ "` arrives as `"foo\"`). When the live editor still
- * holds the raw draft AND it is recognizably the same submission
- * (`eventText === raw.trim()`), decide on the raw text so whitespace
- * after the backslash vetoes the continuation. Otherwise (cleared
- * editor, legacy harness, or an unrelated rewrite by an earlier handler
- * in the chain) fall back to the event text — never invent whitespace.
+ * evidence (`"foo\ "` arrives as `"foo\"`). When `raw` — the pre-submit
+ * snapshot first, the live editor second — still holds the raw draft AND
+ * it is recognizably the same submission (`eventText === raw.trim()`),
+ * decide on the raw text so whitespace after the backslash vetoes the
+ * continuation. Otherwise (consumed/cleared snapshot, cleared editor, or
+ * an unrelated rewrite by an earlier handler in the chain) fall back to
+ * the event text — never invent whitespace.
  */
 export declare function resolveBaseText(eventText: string, raw: unknown): string;
 /**
@@ -86,5 +92,16 @@ export declare function resolveBaseText(eventText: string, raw: unknown): string
  * Unknown shapes never steer a submit.
  */
 export declare function readCursorOffset(event: unknown, length: number): number | undefined;
+export interface SubmitSnapshotDeps {
+    getText: () => string;
+}
+/**
+ * Terminal-input tap factory. Records the live draft verbatim and never
+ * consumes or rewrites input (always returns undefined), so headless/RPC
+ * contexts, image submits, and every other gesture pass through untouched.
+ * Throw-safe: a dead editor keeps the previous snapshot and the `input`
+ * handler fails open downstream.
+ */
+export declare function createSubmitSnapshotTap(deps: SubmitSnapshotDeps): (data: string) => undefined;
 export default function refineExtension(pi: ExtensionHostLike): void;
 export {};

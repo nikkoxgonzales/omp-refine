@@ -61,7 +61,7 @@ Then restart omp. Verify: type `test\`, press `Enter` — the message must NOT s
 |---|---|
 | `text\` (cursor at end) | newline, keeps editing (`text⏎`) — the `\` is consumed |
 | `\` + `Enter` with cursor mid-line | newline spliced at the cursor — when the host reports a cursor offset; neither host sends one today (pi's editor already handles `\`+`Enter` at the cursor natively), so the extension stays end-only there rather than guessing |
-| `text\` + trailing space | submits literally — any whitespace after the `\` vetoes; the raw editor draft is cross-checked because both hosts trim the draft before delivery |
+| `text\` + trailing space | submits literally — any whitespace after the `\` vetoes; decided on a pre-submit draft snapshot, because both hosts trim the draft and clear the editor before the `input` event fires |
 | `text` | submits `text` |
 | `text\\` | submits `text\\` (even count = literal backslashes) |
 | `text\` + image attached | submits as-is (attachments never swallowed) |

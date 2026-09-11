@@ -3,15 +3,20 @@
  *
  * Covers: trailing-backslash counting (odd/even/lone/multiline); the pure
  * shouldContinue gate (interactive-only, no images, string text); the
- * cursor-aware splice helpers; the raw-draft resolver (hosts trim the
- * draft before emitting `input`, so trailing-space evidence survives only
- * in the live editor); the cursor-offset reader; and the wired input
- * handler with a FAKE pi/ctx — continuation swallows the submit and
- * restores editor text, everything else passes through, and a missing
- * or throwing editor fails OPEN (submits literally, never eats input).
+ * cursor-aware splice helpers; the raw-draft resolver; the cursor-offset
+ * reader; the pre-submit snapshot tap; and the wired input handler with a
+ * FAKE pi/ctx — continuation swallows the submit and restores editor text,
+ * everything else passes through, and a missing or throwing editor fails
+ * OPEN (submits literally, never eats input).
  *
- * The fake host mirrors the real submit path: the editor holds the RAW
- * draft while `event.text` carries the host-trimmed submission.
+ * The fake host mirrors the PROVEN live submit path (omp 18.1.x pi-tui
+ * `editor.ts` `#submitValue`: buffer joined + trimmed, buffer reset, and
+ * only then `onSubmit`; `input-controller.ts` trims again before
+ * `emitInput`): terminal-input taps run BEFORE the editor processes Enter
+ * (`tui.ts` listeners precede the focused component), so the tap snapshots
+ * the verbatim raw draft, and by `input`-handler time the editor is
+ * already cleared with `event.text` trimmed. Tests that need the old
+ * unvalidated shape say so explicitly (legacy fallback paths).
  *
  * Plain Node ESM — no test-runner dependency (also runs under `node --test`).
  */
@@ -29,6 +34,7 @@ const {
   shouldContinue,
   resolveBaseText,
   readCursorOffset,
+  createSubmitSnapshotTap,
 } = await import('../dist/index.js');
 const { default: refineExtension } = await import('../dist/extension.js');
 
@@ -38,10 +44,79 @@ function install(ctx) {
   const pi = { on: (event, handler) => { handlers[event] = handler; } };
   refineExtension(pi);
   assert.equal(typeof handlers.input, 'function', 'registers an input handler');
+  // Run the real lifecycle with no editor: clears any snapshot a previous
+  // test's taps left behind, without subscribing anything.
+  handlers.session_start({}, {});
   return (event) => handlers.input(event, ctx);
 }
 
-/** Fake ctx whose editor holds the RAW draft (pre-host-trim), like the live host. */
+/**
+ * Install on a fake pi WITH a terminal-input layer. Returns the wired
+ * `input` handler, the captured terminal taps, the session lifecycle
+ * handlers, and a live `ctx` whose `draft` is the editor buffer.
+ */
+function installLive() {
+  const handlers = {};
+  const taps = [];
+  const pi = { on: (event, handler) => { handlers[event] = handler; } };
+  refineExtension(pi);
+  assert.equal(typeof handlers.input, 'function', 'registers an input handler');
+  const ctx = {
+    draft: '',
+    sets: [],
+    ui: null,
+  };
+  ctx.ui = {
+    getEditorText() {
+      if (ctx.throwOnGet) throw new Error('gone');
+      if (ctx.nonStringGet) return 42;
+      return ctx.draft;
+    },
+    setEditorText(text) {
+      if (ctx.throwOnSet) throw new Error('gone');
+      ctx.sets.push(text);
+      ctx.draft = text;
+    },
+    onTerminalInput(handler) {
+      taps.push(handler);
+      return () => {
+        const at = taps.indexOf(handler);
+        if (at !== -1) taps.splice(at, 1);
+      };
+    },
+  };
+  // Arm the session tap the way the host does (registers the listener).
+  handlers.session_start({}, ctx);
+  assert.equal(taps.length, 1, 'arms one combined terminal-input tap on session_start');
+  // The session tap snapshots the draft, then runs the double-Escape gesture.
+  const snapshotTap = taps[0];
+  return {
+    ctx,
+    taps,
+    snapshotTap,
+    handlers,
+    onInput: (event) => handlers.input(event, ctx),
+    terminal: (data) => {
+      for (const tap of [...taps]) tap(data);
+    },
+  };
+}
+
+/**
+ * Submit `raw` the way the PROVEN live host delivers it:
+ *  1. terminal chunk arrives — taps observe the verbatim raw draft;
+ *  2. the host trims + clears the buffer, then emits the trimmed text.
+ * Returns the handler result; the caller ticks before asserting `draft`.
+ */
+function liveSubmit(live, raw, extra = {}) {
+  live.ctx.draft = raw;
+  live.terminal('\r');
+  live.ctx.draft = ''; // host cleared the buffer before emitting `input`
+  const event = { source: 'interactive', text: raw.trim(), ...extra };
+  return live.onInput(event);
+}
+
+/** Fake ctx whose editor holds the RAW draft (legacy/non-clearing hosts). */
 function ctxWithEditor(raw = '') {
   const ctx = { editorText: raw, ui: null };
   ctx.ui = {
@@ -49,11 +124,6 @@ function ctxWithEditor(raw = '') {
     setEditorText(text) { ctx.editorText = text; },
   };
   return ctx;
-}
-
-/** Submit `raw` the way the host delivers it: trimmed event text + raw editor. */
-function hostSubmit(raw, extra = {}) {
-  return { ctx: ctxWithEditor(raw), event: { source: 'interactive', text: raw.trim(), ...extra } };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -191,7 +261,7 @@ describe('shouldContinue gate', () => {
   });
 });
 
-describe('wired input handler', () => {
+describe('wired input handler (legacy paths: no terminal tap)', () => {
   it('continuation swallows submit, restores editor text on next tick (past host clearDraft)', async () => {
     const ctx = ctxWithEditor();
     const onInput = install(ctx);
@@ -231,29 +301,19 @@ describe('wired input handler', () => {
     assert.deepEqual(throwingSet({ source: 'interactive', text: 'x\\' }), { handled: true });
     await tick(); // deferred throw is caught: must not reject
   });
-  it('trailing space vetoes: host-trimmed "foo\\ " passes through untouched', async () => {
-    for (const raw of ['foo\\ ', 'foo\\  ', 'foo\\ \t']) {
-      const { ctx, event } = hostSubmit(raw);
-      assert.equal(event.text, 'foo\\'); // the host trims before emitting
-      const onInput = install(ctx);
-      assert.equal(onInput(event), undefined);
-      await tick();
-      assert.equal(ctx.editorText, raw); // draft preserved verbatim
-    }
-  });
-  it('genuine continuation still swallows when the raw draft agrees', async () => {
-    const { ctx, event } = hostSubmit('hello\\');
-    const onInput = install(ctx);
-    assert.deepEqual(onInput(event), { handled: true });
-    await tick();
-    assert.equal(ctx.editorText, 'hello\n');
-  });
-  it('cleared editor falls back to the event text (legacy behavior)', async () => {
+  it('cleared editor falls back to the event text (programmatic submit, no tap)', async () => {
     const ctx = ctxWithEditor(); // editor already cleared: raw is ''
     const onInput = install(ctx);
     assert.deepEqual(onInput({ source: 'interactive', text: 'hello\\' }), { handled: true });
     await tick();
     assert.equal(ctx.editorText, 'hello\n');
+  });
+  it('live editor wins on non-clearing hosts (legacy unvalidated shape)', async () => {
+    const ctx = ctxWithEditor('foo\\ '); // old assumption: raw draft still present
+    const onInput = install(ctx);
+    assert.equal(onInput({ source: 'interactive', text: 'foo\\' }), undefined);
+    await tick();
+    assert.equal(ctx.editorText, 'foo\\ '); // draft preserved verbatim
   });
   it('unrelated editor rewrite passes through (respects the handler chain)', async () => {
     const ctx = ctxWithEditor('foo\\');
@@ -262,54 +322,149 @@ describe('wired input handler', () => {
     await tick();
     assert.equal(ctx.editorText, 'foo\\');
   });
-  it('leading-space trim restores the raw draft faithfully', async () => {
-    const { ctx, event } = hostSubmit('  foo\\');
-    assert.equal(event.text, 'foo\\');
-    const onInput = install(ctx);
-    assert.deepEqual(onInput(event), { handled: true });
+});
+
+describe('wired input handler (live host model: tap + cleared buffer + trimmed text)', () => {
+  it('S1: trailing space vetoes — host-trimmed "foo\\ " submits literally', async () => {
+    for (const raw of ['foo\\ ', 'foo\\  ', 'foo\\ \t']) {
+      const live = installLive();
+      assert.equal(liveSubmit(live, raw), undefined);
+      await tick();
+      assert.equal(live.ctx.draft, ''); // host cleared; veto restores nothing
+      assert.deepEqual(live.ctx.sets, []); // setEditorText never called
+    }
+  });
+  it('S2: lone backslash continues — restores the newline on next tick', async () => {
+    for (const [raw, expected] of [['\\', '\n'], ['hello\\', 'hello\n'], ['a\nb\\', 'a\nb\n']]) {
+      const live = installLive();
+      assert.deepEqual(liveSubmit(live, raw), { handled: true });
+      assert.equal(live.ctx.draft, ''); // restore is deferred past host clearDraft
+      await tick();
+      assert.equal(live.ctx.draft, expected);
+    }
+  });
+  it('S2: double backslash stays a literal submit (documented escape hatch)', async () => {
+    const live = installLive();
+    assert.equal(liveSubmit(live, 'foo\\\\'), undefined);
     await tick();
-    assert.equal(ctx.editorText, '  foo\n');
+    assert.equal(live.ctx.draft, '');
+    assert.deepEqual(live.ctx.sets, []);
+  });
+  it('leading-space trim restores the snapshot draft faithfully', async () => {
+    const live = installLive();
+    assert.deepEqual(liveSubmit(live, '  foo\\'), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, '  foo\n');
+  });
+  it('image and non-interactive submits pass through even with a snapshot', async () => {
+    const live = installLive();
+    live.ctx.draft = 'x\\';
+    live.terminal('\r');
+    live.ctx.draft = '';
+    assert.equal(live.onInput({ source: 'rpc', text: 'x\\' }), undefined);
+    assert.equal(live.onInput({ source: 'interactive', text: 'x\\', images: [{}] }), undefined);
+    await tick();
+    assert.equal(live.ctx.draft, '');
+    assert.deepEqual(live.ctx.sets, []);
+  });
+  it('stale snapshot mismatch falls back to the event text', async () => {
+    const live = installLive();
+    live.ctx.draft = 'foo\\ '; // tap sees a veto draft…
+    live.terminal('\r');
+    live.ctx.draft = '';
+    // …but a different submission arrives (earlier handler rewrote it).
+    assert.deepEqual(live.onInput({ source: 'interactive', text: 'bar\\' }), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'bar\n');
+  });
+  it('snapshot is consumed once: a tap-less resubmit falls back', async () => {
+    const live = installLive();
+    assert.equal(liveSubmit(live, 'foo\\ '), undefined); // veto consumes the snapshot
+    await tick();
+    live.ctx.draft = ''; // programmatic resubmit with no terminal chunk
+    assert.deepEqual(live.onInput({ source: 'interactive', text: 'foo\\' }), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'foo\n');
+  });
+  it('session switch clears the snapshot (no cross-session leak)', async () => {
+    const live = installLive();
+    live.ctx.draft = 'foo\\ ';
+    live.terminal('\r'); // veto snapshot captured…
+    live.handlers.session_switch({}, {
+      ui: { getEditorText: () => '', setEditorText() {}, onTerminalInput: () => () => {} },
+    });
+    live.ctx.draft = ''; // …but the session moved on: fallback decides
+    assert.deepEqual(live.onInput({ source: 'interactive', text: 'foo\\' }), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'foo\n');
+  });
+  it('throwing tap editor fails OPEN at submit time (unreadable editor)', async () => {
+    const live = installLive();
+    live.ctx.throwOnGet = true;
+    live.terminal('\r'); // tap throw is swallowed; no snapshot
+    live.ctx.draft = '';
+    assert.equal(live.onInput({ source: 'interactive', text: 'foo\\' }), undefined);
+    await tick();
+  });
+  it('non-string tap draft is ignored (garbage-safe snapshot)', async () => {
+    const live = installLive();
+    live.ctx.nonStringGet = true;
+    live.terminal('\r'); // getText() returns 42: snapshot untouched
+    live.ctx.nonStringGet = false;
+    live.ctx.draft = '';
+    assert.deepEqual(live.onInput({ source: 'interactive', text: 'foo\\' }), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'foo\n');
+  });
+  it('snapshot tap never consumes or rewrites terminal input', () => {
+    const live = installLive();
+    for (const data of ['\r', '\n', '\x1b', '\x1b[A', 'a', '\x1b[13;2u']) {
+      assert.equal(live.snapshotTap(data), undefined);
+    }
   });
   it('mid-line cursor splices the newline at the cursor', async () => {
-    const { ctx, event } = hostSubmit('hello \\ world', { cursorOffset: 7 });
-    const onInput = install(ctx);
-    assert.deepEqual(onInput(event), { handled: true });
+    const live = installLive();
+    assert.deepEqual(liveSubmit(live, 'hello \\ world', { cursorOffset: 7 }), { handled: true });
     await tick();
-    assert.equal(ctx.editorText, 'hello \n world');
+    assert.equal(live.ctx.draft, 'hello \n world');
   });
   it('mid-line cursor without a gap splices directly', async () => {
-    const { ctx, event } = hostSubmit('hello \\world', { cursorOffset: 7 });
-    const onInput = install(ctx);
-    assert.deepEqual(onInput(event), { handled: true });
+    const live = installLive();
+    assert.deepEqual(liveSubmit(live, 'hello \\world', { cursorOffset: 7 }), { handled: true });
     await tick();
-    assert.equal(ctx.editorText, 'hello \nworld');
-  });
-  it('cursor at the end behaves like the end-of-text check', async () => {
-    const { ctx, event } = hostSubmit('foo\\', { cursorOffset: 4 });
-    const onInput = install(ctx);
-    assert.deepEqual(onInput(event), { handled: true });
-    await tick();
-    assert.equal(ctx.editorText, 'foo\n');
+    assert.equal(live.ctx.draft, 'hello \nworld');
   });
   it('reported cursor governs: Enter elsewhere submits literally', async () => {
-    const { ctx, event } = hostSubmit('ab\\', { cursorOffset: 1 });
-    const onInput = install(ctx);
-    assert.equal(onInput(event), undefined); // cursor after 'a', not after '\'
+    const live = installLive();
+    assert.equal(liveSubmit(live, 'ab\\', { cursorOffset: 1 }), undefined); // cursor after 'a', not after '\'
     await tick();
-    assert.equal(ctx.editorText, 'ab\\');
+    assert.equal(live.ctx.draft, '');
   });
   it('even run before the cursor passes through (mid-line escape hatch)', async () => {
-    const { ctx, event } = hostSubmit('a\\\\b', { cursorOffset: 3 });
-    const onInput = install(ctx);
-    assert.equal(onInput(event), undefined);
+    const live = installLive();
+    assert.equal(liveSubmit(live, 'a\\\\b', { cursorOffset: 3 }), undefined);
     await tick();
-    assert.equal(ctx.editorText, 'a\\\\b');
+    assert.equal(live.ctx.draft, '');
+  });
+  it('cursor at the end behaves like the end-of-text check', async () => {
+    const live = installLive();
+    assert.deepEqual(liveSubmit(live, 'foo\\', { cursorOffset: 4 }), { handled: true });
+    await tick();
+    assert.equal(live.ctx.draft, 'foo\n');
   });
   it('invalid cursor offset falls back to the end-of-text check', async () => {
-    const { ctx, event } = hostSubmit('foo\\', { cursorOffset: 99 });
-    const onInput = install(ctx);
-    assert.deepEqual(onInput(event), { handled: true });
+    const live = installLive();
+    assert.deepEqual(liveSubmit(live, 'foo\\', { cursorOffset: 99 }), { handled: true });
     await tick();
-    assert.equal(ctx.editorText, 'foo\n');
+    assert.equal(live.ctx.draft, 'foo\n');
+  });
+  it('tap factory feeds the same snapshot seam the handler consumes', async () => {
+    const seen = [];
+    const ctx = { ui: { getEditorText: () => '', setEditorText: (t) => seen.push(t) } };
+    const onInput = install(ctx);
+    assert.equal(createSubmitSnapshotTap({ getText: () => 'direct\\ ' })('x'), undefined);
+    assert.equal(onInput({ source: 'interactive', text: 'direct\\' }), undefined); // veto via factory snapshot
+    await tick();
+    assert.deepEqual(seen, []);
   });
 });
